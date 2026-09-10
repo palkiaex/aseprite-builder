@@ -1,4 +1,4 @@
-name: Build and release Aseprite
+name: Build and release Aseprite (AppImage)
 
 on:
   push:
@@ -36,8 +36,7 @@ jobs:
       download-link: ${{ needs.fetch-aseprite-info.outputs.download-link }}
       release-tag: ${{ needs.fetch-aseprite-info.outputs.release-tag }}
     steps:
-      # Note: Changed to v4 (v7 does not exist yet for actions/checkout)
-      - uses: actions/checkout@v4 
+      - uses: actions/checkout@v4
       - uses: ncipollo/release-action@v1.21.0
         with:
           tag: ${{ needs.fetch-aseprite-info.outputs.release-tag }}
@@ -51,16 +50,14 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    # Run all steps inside the official openSUSE Tumbleweed container
     container: opensuse/tumbleweed
     steps:
       - name: Install System Dependencies
         shell: bash
         run: |
           zypper refresh
-          # Install build tools and GitHub Actions necessities (tar, gzip, curl)
-          zypper install -y git-core cmake ninja gcc-c++ wget unzip p7zip tar gzip curl
-          # Install Aseprite dependencies for openSUSE
+          # Added 'file' which is required by AppImageTool
+          zypper install -y git-core cmake ninja gcc-c++ wget unzip p7zip tar gzip curl file
           zypper install -y \
             libpixman-1-0-devel freetype2-devel harfbuzz-devel zlib-devel \
             libX11-devel libXcursor-devel libXi-devel libXrandr-devel \
@@ -105,23 +102,52 @@ jobs:
         run: |
           cd build && ninja
           
-      - name: Clean Up Build folder
-        working-directory: aseprite/build/bin
+      - name: Package as AppImage
         shell: bash
-        run: find . -mindepth 1 ! \( -name 'aseprite' -o -name 'data' -prune \) -exec rm -rf {} +
-        
-      - name: Make portable zip
-        working-directory: aseprite/build/bin
-        run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
-        
-      - name: Create release zip
-        working-directory: aseprite/build/bin
-        run: 7z a -tzip Aseprite-${{ needs.create-release.outputs.release-tag }}-openSUSE-Tumbleweed.zip *
+        run: |
+          # 1. Download AppImageTool (used to create the single executable file)
+          wget -O appimagetool "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+          # 2. Create the AppImage directory structure
+          mkdir -p AppDir/usr/bin
+          
+          # Copy binary and data folder
+          cp aseprite/build/bin/aseprite AppDir/usr/bin/
+          cp -r aseprite/build/bin/data AppDir/usr/bin/
+          
+          # Create the portable ini file
+          echo '# This file is here so Aseprite behaves as a portable program' > AppDir/usr/bin/aseprite.ini
+
+          # 3. Add Desktop integration (so Linux knows the icon and app name)
+          cat << 'EOF' > AppDir/aseprite.desktop
+          [Desktop Entry]
+          Name=Aseprite
+          Exec=aseprite %U
+          Icon=aseprite
+          Type=Application
+          Categories=Graphics;
+          EOF
+          
+          # Copy the official icon from Aseprite source
+          cp aseprite/data/icons/aseprite_256.png AppDir/aseprite.png
+
+          # 4. Create AppRun (the entry point script inside the AppImage)
+          cat << 'EOF' > AppDir/AppRun
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          exec "${HERE}/usr/bin/aseprite" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+          # 5. Build the final AppImage executable
+          # Note: We use --appimage-extract-and-run because GitHub Docker containers don't have FUSE enabled
+          ./appimagetool --appimage-extract-and-run AppDir Aseprite-${{ needs.create-release.outputs.release-tag }}-openSUSE-Tumbleweed.AppImage
         
       - name: Upload release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: aseprite/build/bin/Aseprite-${{ needs.create-release.outputs.release-tag }}-openSUSE-Tumbleweed.zip
-          asset_name: Aseprite-${{ needs.create-release.outputs.release-tag }}-openSUSE-Tumbleweed.zip
+          file: Aseprite-${{ needs.create-release.outputs.release-tag }}-openSUSE-Tumbleweed.AppImage
+          asset_name: Aseprite-${{ needs.create-release.outputs.release-tag }}-openSUSE-Tumbleweed.AppImage
           tag: ${{ needs.create-release.outputs.release-tag }}
