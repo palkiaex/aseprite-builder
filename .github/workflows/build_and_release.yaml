@@ -130,7 +130,7 @@ jobs:
           EOF
           
           # Copy the official icon from Aseprite source
-          cp aseprite/data/icons/aseprite_256.png AppDir/aseprite.png
+          cp aseprite/data/icons/ase256.png AppDir/aseprite.png
 
           # 4. Create AppRun (the entry point script inside the AppImage)
           cat << 'EOF' > AppDir/AppRun
